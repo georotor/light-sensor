@@ -93,10 +93,10 @@ void bh1750LightLevel() {
     return;
 
   float lux = lightMeter.readLightLevel();
-  Serial.printf("Light level: %f\n", lux);
-
   char lux_str[20];
-  sprintf(lux_str, "%f", lux);
+  sprintf(lux_str, "%.2f", lux);
+  Serial.printf("Light level: %s\n", lux_str);
+
   pubSubClient.publish("bh1750fvi/lightlevel", lux_str);
   lastPub = pub;
 }
