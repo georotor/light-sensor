@@ -2,6 +2,7 @@
 #include <BH1750.h>
 #include <Wire.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <WiFiManager.h>
 #include <PubSubClient.h>
@@ -13,10 +14,12 @@ struct Config {
 
 bool shouldSaveConfig = false;
 unsigned long lastPub = 0;
+float lux;
 
 BH1750 lightMeter;
 WiFiClient wifiClient;
 PubSubClient pubSubClient(wifiClient);
+ESP8266WebServer httpServer(80);
 
 void saveConfigCallback () {
   Serial.println("Should save config");
@@ -81,24 +84,39 @@ void connectMQTT() {
   }
 }
 
+void initHttpServer() {
+  httpServer.on("/", []() {
+    httpServer.send(200, "text/plain", String(lux, 2));
+  });
+  httpServer.on("/json", []() {
+    char buff[50];
+    sprintf(buff, "{\"lightLevel\": %0.2f}\n", lux);
+    httpServer.send(200, "text/plain", buff);
+  });
+  httpServer.begin();
+}
+
 void initBH1750FVI() {
   Wire.begin();
   lightMeter.begin();
-  Serial.println("BH1750 Test begin");
+  Serial.println("BH1750 Start begin");
 }
 
-void bh1750LightLevel() {
+void bh1750LightLevelGet() {
   unsigned long pub = millis();
   if ((pub - lastPub) < 1000*60 and pub > lastPub and lastPub != 0)
     return;
 
-  float lux = lightMeter.readLightLevel();
-  char lux_str[20];
-  sprintf(lux_str, "%.2f", lux);
-  Serial.printf("Light level: %s\n", lux_str);
-
-  pubSubClient.publish("bh1750fvi/lightlevel", lux_str);
+  lux = lightMeter.readLightLevel();
   lastPub = pub;
+  bh1750LightLevelSend();
+}
+
+void bh1750LightLevelSend() {
+  char buff[20];
+  sprintf(buff, "%.2f", lux);
+  Serial.printf("Light level: %s\n", buff);
+  pubSubClient.publish("bh1750fvi/lightlevel", buff);
 }
 
 void setup() {
@@ -107,6 +125,7 @@ void setup() {
   initEEPROM();
   runWiFi();
   if (MDNS.begin("bh1750fvi")) Serial.println("MDNS responder started");
+  initHttpServer();
   initMQTT();
   initBH1750FVI();
 }
@@ -115,8 +134,9 @@ void loop() {
   while (!pubSubClient.connected())
     connectMQTT();
 
-  bh1750LightLevel();
+  bh1750LightLevelGet();
 
   pubSubClient.loop();
   MDNS.update();
+  httpServer.handleClient();
 }
