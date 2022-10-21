@@ -13,11 +13,13 @@ struct Config {
 } config;
 
 bool shouldSaveConfig = false;
-unsigned long lastPub = 0;
+unsigned long lastReadTime = 0;
+unsigned long lastPubTime = 0;
 float lux;
 
 BH1750 lightMeter;
 WiFiClient wifiClient;
+WiFiManager wifiManager;
 PubSubClient pubSubClient(wifiClient);
 ESP8266WebServer httpServer(80);
 
@@ -41,10 +43,9 @@ void runWiFi() {
   WiFiManagerParameter custom_mqtt_server("server", "Server mqtt", config.mqtt_server, 40);
   WiFiManagerParameter custom_mqtt_port("port", "Port mqtt", config.mqtt_port, 6);
 
-  WiFiManager wifiManager;
   // reset settings - for testing
   // wifiManager.resetSettings();
-  // wifiManager.setConnectTimeout(180);
+  wifiManager.setConnectTimeout(180);
   wifiManager.setSaveConfigCallback(saveConfigCallback);
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_mqtt_port);
@@ -88,11 +89,32 @@ void initHttpServer() {
   httpServer.on("/", []() {
     httpServer.send(200, "text/plain", String(lux, 2));
   });
+
   httpServer.on("/json", []() {
     char buff[50];
     sprintf(buff, "{\"lightLevel\": %0.2f}\n", lux);
     httpServer.send(200, "text/plain", buff);
   });
+
+  httpServer.on("/esp/reboot", []() {
+    if (!httpServer.authenticate(wifiManager.getWiFiSSID().c_str(), wifiManager.getWiFiPass().c_str()))
+      return httpServer.requestAuthentication();
+
+    httpServer.send(200, "text/plain", "Reboot...");
+    delay(1000);
+    ESP.restart();
+  });
+
+  httpServer.on("/esp/reset", []() {
+    if (!httpServer.authenticate(wifiManager.getWiFiSSID().c_str(), wifiManager.getWiFiPass().c_str()))
+      return httpServer.requestAuthentication();
+
+    httpServer.send(200, "text/plain", "Reset settings and reboot...");
+    delay(1000);
+    wifiManager.resetSettings();    
+    ESP.restart();
+  });
+
   httpServer.begin();
 }
 
@@ -103,20 +125,27 @@ void initBH1750FVI() {
 }
 
 void bh1750LightLevelGet() {
-  unsigned long pub = millis();
-  if ((pub - lastPub) < 1000*60 and pub > lastPub and lastPub != 0)
+  unsigned long readTime = millis();
+  if ((readTime - lastReadTime) < 2000 and readTime > lastReadTime and lastReadTime != 0)
     return;
 
   lux = lightMeter.readLightLevel();
-  lastPub = pub;
+  lastReadTime = lastReadTime;
+  
   bh1750LightLevelSend();
 }
 
 void bh1750LightLevelSend() {
+  unsigned long pubTime = millis();
+  if ((pubTime - lastPubTime) < 1000*60 and pubTime > lastPubTime and lastPubTime != 0)
+    return;
+
   char buff[20];
   sprintf(buff, "%.2f", lux);
   Serial.printf("Light level: %s\n", buff);
+  
   pubSubClient.publish("bh1750fvi/lightlevel", buff);
+  lastPubTime = pubTime;
 }
 
 void setup() {
