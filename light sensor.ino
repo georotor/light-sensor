@@ -6,6 +6,8 @@
 #include <ESP8266mDNS.h>
 #include <WiFiManager.h>
 #include <PubSubClient.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 
 struct Config {
   char mqtt_server[40] = "mqtt.lan";
@@ -148,12 +150,20 @@ void bh1750LightLevelSend() {
   lastPubTime = pubTime;
 }
 
+void initOTA() {
+  ArduinoOTA.setPort(8266);
+  ArduinoOTA.setHostname("bh1750fvi");
+  ArduinoOTA.setPassword( wifiManager.getWiFiPass().c_str() );
+  ArduinoOTA.begin();
+}
+
 void setup() {
   Serial.begin(9600);
 
   initEEPROM();
   runWiFi();
   if (MDNS.begin("bh1750fvi")) Serial.println("MDNS responder started");
+  initOTA();
   initHttpServer();
   initMQTT();
   initBH1750FVI();
@@ -168,4 +178,5 @@ void loop() {
   pubSubClient.loop();
   MDNS.update();
   httpServer.handleClient();
+  ArduinoOTA.handle();
 }
